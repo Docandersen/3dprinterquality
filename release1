@@ -1,0 +1,643 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Print Compatibility Analyzer</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; }
+        .gradient-bg { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
+        .glass-effect { backdrop-filter: blur(10px); background: rgba(255, 255, 255, 0.1); }
+        .file-drop-zone { 
+            border: 2px dashed #cbd5e1; 
+            transition: all 0.3s ease;
+        }
+        .file-drop-zone:hover { 
+            border-color: #3b82f6; 
+            background-color: #f8fafc; 
+        }
+        .file-drop-zone.drag-over {
+            border-color: #10b981;
+            background-color: #ecfdf5;
+        }
+        .printer-card {
+            transition: all 0.2s ease;
+            border: 2px solid transparent;
+        }
+        .printer-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(0,0,0,0.1);
+        }
+        .printer-card.selected {
+            border-color: #3b82f6;
+            background-color: #eff6ff;
+        }
+        .score-ring {
+            transform: rotate(-90deg);
+        }
+        .analysis-item {
+            animation: slideIn 0.3s ease-out forwards;
+            opacity: 0;
+            transform: translateY(20px);
+        }
+        @keyframes slideIn {
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useCallback, useRef } = React;
+
+        // Printer Database
+        const printerDatabase = [
+            {
+                id: 'prusa-mk4',
+                name: 'Prusa MK4',
+                brand: 'Prusa',
+                buildVolume: { x: 250, y: 210, z: 220 },
+                materials: ['PLA', 'PETG', 'ABS', 'ASA', 'TPU'],
+                nozzleDiameter: [0.4, 0.6, 0.8],
+                layerHeight: { min: 0.05, max: 0.35 },
+                heatedBed: true,
+                maxBedTemp: 120,
+                maxHotendTemp: 300,
+                bedSurface: ['PEI', 'Textured'],
+                firmware: 'Marlin',
+                enclosure: false,
+                image: '🖨️'
+            },
+            {
+                id: 'ender-3-v2',
+                name: 'Ender 3 V2',
+                brand: 'Creality',
+                buildVolume: { x: 220, y: 220, z: 250 },
+                materials: ['PLA', 'ABS', 'PETG'],
+                nozzleDiameter: [0.4],
+                layerHeight: { min: 0.1, max: 0.3 },
+                heatedBed: true,
+                maxBedTemp: 100,
+                maxHotendTemp: 260,
+                bedSurface: ['Glass', 'Magnetic'],
+                firmware: 'Marlin',
+                enclosure: false,
+                image: '🏭'
+            },
+            {
+                id: 'bambu-x1-carbon',
+                name: 'Bambu X1 Carbon',
+                brand: 'Bambu Lab',
+                buildVolume: { x: 256, y: 256, z: 256 },
+                materials: ['PLA', 'PETG', 'ABS', 'ASA', 'TPU', 'PA', 'PC'],
+                nozzleDiameter: [0.4, 0.6, 0.8],
+                layerHeight: { min: 0.08, max: 0.32 },
+                heatedBed: true,
+                maxBedTemp: 120,
+                maxHotendTemp: 300,
+                bedSurface: ['PEI', 'Textured'],
+                firmware: 'Bambu',
+                enclosure: true,
+                image: '🚀'
+            },
+            {
+                id: 'ultimaker-s3',
+                name: 'Ultimaker S3',
+                brand: 'Ultimaker',
+                buildVolume: { x: 230, y: 190, z: 200 },
+                materials: ['PLA', 'ABS', 'PETG', 'TPU', 'PP', 'PC'],
+                nozzleDiameter: [0.25, 0.4, 0.6, 0.8],
+                layerHeight: { min: 0.06, max: 0.6 },
+                heatedBed: true,
+                maxBedTemp: 140,
+                maxHotendTemp: 280,
+                bedSurface: ['Glass'],
+                firmware: 'Ultimaker',
+                enclosure: false,
+                image: '⚡'
+            },
+            {
+                id: 'formlabs-form-3',
+                name: 'Form 3',
+                brand: 'Formlabs',
+                buildVolume: { x: 145, y: 145, z: 185 },
+                materials: ['Resin'],
+                nozzleDiameter: [0.025], // Layer resolution
+                layerHeight: { min: 0.025, max: 0.3 },
+                heatedBed: false,
+                maxBedTemp: 35,
+                maxHotendTemp: 35,
+                bedSurface: ['FEP'],
+                firmware: 'PreForm',
+                enclosure: true,
+                image: '💎'
+            }
+        ];
+
+        // File Analysis Engine
+        class FileAnalyzer {
+            static analyzeSTL(file, printer) {
+                // Simulated STL analysis
+                const issues = [];
+                const recommendations = [];
+                let score = 100;
+
+                // Build volume check (simulated)
+                const dimensions = {
+                    x: Math.random() * 300,
+                    y: Math.random() * 300,
+                    z: Math.random() * 300
+                };
+
+                if (dimensions.x > printer.buildVolume.x || 
+                    dimensions.y > printer.buildVolume.y || 
+                    dimensions.z > printer.buildVolume.z) {
+                    issues.push({
+                        severity: 'Critical',
+                        type: 'Build Volume',
+                        message: `Model exceeds build volume. Current: ${dimensions.x.toFixed(1)}×${dimensions.y.toFixed(1)}×${dimensions.z.toFixed(1)}mm, Max: ${printer.buildVolume.x}×${printer.buildVolume.y}×${printer.buildVolume.z}mm`,
+                        recommendation: 'Scale down model or split into parts'
+                    });
+                    score -= 40;
+                }
+
+                // Overhang detection (simulated)
+                const hasOverhangs = Math.random() > 0.6;
+                if (hasOverhangs) {
+                    issues.push({
+                        severity: 'Moderate',
+                        type: 'Overhangs',
+                        message: 'Detected overhangs >45° that may require supports',
+                        recommendation: 'Enable support structures or reorient model'
+                    });
+                    score -= 15;
+                }
+
+                // Wall thickness check (simulated)
+                const minWallThickness = Math.random() * 2;
+                const nozzleSize = printer.nozzleDiameter[0];
+                if (minWallThickness < nozzleSize * 1.2) {
+                    issues.push({
+                        severity: 'Moderate',
+                        type: 'Wall Thickness',
+                        message: `Thin walls detected (${minWallThickness.toFixed(2)}mm). Minimum recommended: ${(nozzleSize * 1.2).toFixed(2)}mm`,
+                        recommendation: 'Increase wall thickness or use smaller nozzle'
+                    });
+                    score -= 10;
+                }
+
+                // Material compatibility
+                const recommendedMaterials = printer.materials.filter(m => m !== 'Resin');
+                if (recommendedMaterials.length > 0) {
+                    recommendations.push({
+                        type: 'Material',
+                        message: `Recommended materials: ${recommendedMaterials.join(', ')}`
+                    });
+                }
+
+                return {
+                    score: Math.max(0, score),
+                    issues,
+                    recommendations,
+                    metadata: {
+                        dimensions,
+                        estimatedPrintTime: `${Math.floor(Math.random() * 12) + 1}h ${Math.floor(Math.random() * 60)}m`,
+                        materialUsage: `${(Math.random() * 100 + 10).toFixed(1)}g`,
+                        layerCount: Math.floor(dimensions.z / 0.2)
+                    }
+                };
+            }
+
+            static analyzeGCode(file, printer) {
+                // Simulated G-code analysis
+                const issues = [];
+                const recommendations = [];
+                let score = 95;
+
+                // Temperature compatibility check
+                const hotendTemp = Math.floor(Math.random() * 100) + 200;
+                const bedTemp = Math.floor(Math.random() * 50) + 60;
+
+                if (hotendTemp > printer.maxHotendTemp) {
+                    issues.push({
+                        severity: 'Critical',
+                        type: 'Temperature',
+                        message: `Hotend temperature (${hotendTemp}°C) exceeds printer limit (${printer.maxHotendTemp}°C)`,
+                        recommendation: 'Reduce hotend temperature or change material'
+                    });
+                    score -= 35;
+                }
+
+                if (bedTemp > printer.maxBedTemp) {
+                    issues.push({
+                        severity: 'Critical',
+                        type: 'Temperature',
+                        message: `Bed temperature (${bedTemp}°C) exceeds printer limit (${printer.maxBedTemp}°C)`,
+                        recommendation: 'Reduce bed temperature'
+                    });
+                    score -= 25;
+                }
+
+                // Firmware compatibility
+                const firmwareCommands = ['M600', 'M701', 'M702'];
+                const incompatibleCommands = firmwareCommands.filter(cmd => 
+                    Math.random() > 0.8 && !['Marlin', 'Bambu'].includes(printer.firmware)
+                );
+
+                if (incompatibleCommands.length > 0) {
+                    issues.push({
+                        severity: 'Moderate',
+                        type: 'Firmware',
+                        message: `Incompatible commands detected: ${incompatibleCommands.join(', ')}`,
+                        recommendation: 'Update firmware or remove incompatible commands'
+                    });
+                    score -= 15;
+                }
+
+                return {
+                    score: Math.max(0, score),
+                    issues,
+                    recommendations,
+                    metadata: {
+                        hotendTemp,
+                        bedTemp,
+                        estimatedPrintTime: `${Math.floor(Math.random() * 8) + 2}h ${Math.floor(Math.random() * 60)}m`,
+                        layerHeight: (Math.random() * 0.25 + 0.1).toFixed(2),
+                        infill: `${Math.floor(Math.random() * 80) + 10}%`
+                    }
+                };
+            }
+        }
+
+        // Main App Component
+        function App() {
+            const [selectedPrinter, setSelectedPrinter] = useState(null);
+            const [uploadedFile, setUploadedFile] = useState(null);
+            const [analysis, setAnalysis] = useState(null);
+            const [isAnalyzing, setIsAnalyzing] = useState(false);
+            const [dragOver, setDragOver] = useState(false);
+            const fileInputRef = useRef(null);
+
+            const handleFileUpload = useCallback((file) => {
+                if (!selectedPrinter) {
+                    alert('Please select a printer first');
+                    return;
+                }
+
+                const validTypes = ['.stl', '.gcode', '.gco'];
+                const fileExtension = file.name.toLowerCase().substring(file.name.lastIndexOf('.'));
+                
+                if (!validTypes.includes(fileExtension)) {
+                    alert('Please upload a valid STL or G-code file');
+                    return;
+                }
+
+                setUploadedFile(file);
+                setIsAnalyzing(true);
+
+                // Simulate analysis delay
+                setTimeout(() => {
+                    let analysisResult;
+                    if (fileExtension === '.stl') {
+                        analysisResult = FileAnalyzer.analyzeSTL(file, selectedPrinter);
+                    } else {
+                        analysisResult = FileAnalyzer.analyzeGCode(file, selectedPrinter);
+                    }
+                    
+                    setAnalysis(analysisResult);
+                    setIsAnalyzing(false);
+                }, 2000);
+            }, [selectedPrinter]);
+
+            const handleDrop = useCallback((e) => {
+                e.preventDefault();
+                setDragOver(false);
+                const files = Array.from(e.dataTransfer.files);
+                if (files.length > 0) {
+                    handleFileUpload(files[0]);
+                }
+            }, [handleFileUpload]);
+
+            const handleDragOver = useCallback((e) => {
+                e.preventDefault();
+                setDragOver(true);
+            }, []);
+
+            const handleDragLeave = useCallback((e) => {
+                e.preventDefault();
+                setDragOver(false);
+            }, []);
+
+            const getScoreColor = (score) => {
+                if (score >= 85) return 'text-green-600';
+                if (score >= 60) return 'text-yellow-600';
+                return 'text-red-600';
+            };
+
+            const getScoreLabel = (score) => {
+                if (score >= 85) return 'High Compatibility';
+                if (score >= 60) return 'Conditional Compatibility';
+                return 'Likely Failure';
+            };
+
+            const getSeverityColor = (severity) => {
+                switch (severity) {
+                    case 'Critical': return 'bg-red-100 text-red-800 border-red-200';
+                    case 'Moderate': return 'bg-yellow-100 text-yellow-800 border-yellow-200';
+                    default: return 'bg-blue-100 text-blue-800 border-blue-200';
+                }
+            };
+
+            return (
+                <div className="min-h-screen gradient-bg">
+                    <div className="container mx-auto px-4 py-8">
+                        {/* Header */}
+                        <div className="text-center mb-12">
+                            <h1 className="text-4xl font-bold text-white mb-4">
+                                3D Print Compatibility Analyzer
+                            </h1>
+                            <p className="text-xl text-white opacity-90">
+                                Analyze your STL and G-code files for optimal 3D printing success
+                            </p>
+                        </div>
+
+                        <div className="grid lg:grid-cols-3 gap-8">
+                            {/* Printer Selection */}
+                            <div className="lg:col-span-1">
+                                <div className="bg-white rounded-xl shadow-xl p-6">
+                                    <h2 className="text-2xl font-bold mb-6 text-gray-800">
+                                        Select Your Printer
+                                    </h2>
+                                    <div className="space-y-4 max-h-96 overflow-y-auto">
+                                        {printerDatabase.map((printer) => (
+                                            <div
+                                                key={printer.id}
+                                                className={`printer-card p-4 rounded-lg cursor-pointer ${
+                                                    selectedPrinter?.id === printer.id ? 'selected' : 'bg-gray-50'
+                                                }`}
+                                                onClick={() => setSelectedPrinter(printer)}
+                                            >
+                                                <div className="flex items-center space-x-3">
+                                                    <span className="text-2xl">{printer.image}</span>
+                                                    <div>
+                                                        <h3 className="font-semibold text-gray-800">
+                                                            {printer.name}
+                                                        </h3>
+                                                        <p className="text-sm text-gray-600">
+                                                            {printer.brand} • {printer.buildVolume.x}×{printer.buildVolume.y}×{printer.buildVolume.z}mm
+                                                        </p>
+                                                        <p className="text-xs text-gray-500 mt-1">
+                                                            {printer.materials.slice(0, 3).join(', ')}
+                                                            {printer.materials.length > 3 && `+${printer.materials.length - 3} more`}
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* File Upload and Analysis */}
+                            <div className="lg:col-span-2">
+                                <div className="bg-white rounded-xl shadow-xl p-6">
+                                    <h2 className="text-2xl font-bold mb-6 text-gray-800">
+                                        Upload & Analyze
+                                    </h2>
+
+                                    {/* File Upload Area */}
+                                    <div
+                                        className={`file-drop-zone p-8 rounded-lg text-center mb-6 ${
+                                            dragOver ? 'drag-over' : ''
+                                        }`}
+                                        onDrop={handleDrop}
+                                        onDragOver={handleDragOver}
+                                        onDragLeave={handleDragLeave}
+                                        onClick={() => fileInputRef.current?.click()}
+                                    >
+                                        <input
+                                            ref={fileInputRef}
+                                            type="file"
+                                            className="hidden"
+                                            accept=".stl,.gcode,.gco"
+                                            onChange={(e) => {
+                                                if (e.target.files[0]) {
+                                                    handleFileUpload(e.target.files[0]);
+                                                }
+                                            }}
+                                        />
+                                        <div className="text-4xl mb-4">📁</div>
+                                        <p className="text-lg font-medium text-gray-700 mb-2">
+                                            Drop your STL or G-code file here
+                                        </p>
+                                        <p className="text-sm text-gray-500">
+                                            or click to browse files
+                                        </p>
+                                        {uploadedFile && (
+                                            <div className="mt-4 p-3 bg-blue-50 rounded-lg">
+                                                <p className="text-sm font-medium text-blue-800">
+                                                    📄 {uploadedFile.name}
+                                                </p>
+                                                <p className="text-xs text-blue-600">
+                                                    {(uploadedFile.size / 1024 / 1024).toFixed(2)} MB
+                                                </p>
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {/* Analysis Loading */}
+                                    {isAnalyzing && (
+                                        <div className="text-center py-8">
+                                            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+                                            <p className="text-lg font-medium text-gray-700">
+                                                Analyzing file compatibility...
+                                            </p>
+                                        </div>
+                                    )}
+
+                                    {/* Analysis Results */}
+                                    {analysis && !isAnalyzing && (
+                                        <div className="space-y-6">
+                                            {/* Compatibility Score */}
+                                            <div className="bg-gradient-to-r from-blue-50 to-purple-50 p-6 rounded-xl">
+                                                <div className="flex items-center justify-between">
+                                                    <div>
+                                                        <h3 className="text-xl font-bold text-gray-800 mb-2">
+                                                            Compatibility Score
+                                                        </h3>
+                                                        <p className={`text-3xl font-bold ${getScoreColor(analysis.score)}`}>
+                                                            {analysis.score}/100
+                                                        </p>
+                                                        <p className={`text-sm font-medium ${getScoreColor(analysis.score)}`}>
+                                                            {analysis.score >= 85 ? '✅' : analysis.score >= 60 ? '⚠️' : '❌'} {getScoreLabel(analysis.score)}
+                                                        </p>
+                                                    </div>
+                                                    <div className="relative w-24 h-24">
+                                                        <svg className="w-24 h-24 score-ring" viewBox="0 0 36 36">
+                                                            <path
+                                                                className="text-gray-300"
+                                                                stroke="currentColor"
+                                                                strokeWidth="3"
+                                                                fill="none"
+                                                                d="M18 2.0845
+                                                                a 15.9155 15.9155 0 0 1 0 31.831
+                                                                a 15.9155 15.9155 0 0 1 0 -31.831"
+                                                            />
+                                                            <path
+                                                                className={getScoreColor(analysis.score)}
+                                                                stroke="currentColor"
+                                                                strokeWidth="3"
+                                                                strokeLinecap="round"
+                                                                fill="none"
+                                                                strokeDasharray={`${analysis.score}, 100`}
+                                                                d="M18 2.0845
+                                                                a 15.9155 15.9155 0 0 1 0 31.831
+                                                                a 15.9155 15.9155 0 0 1 0 -31.831"
+                                                            />
+                                                        </svg>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            {/* File Metadata */}
+                                            <div className="bg-gray-50 p-4 rounded-lg">
+                                                <h4 className="font-semibold text-gray-800 mb-3">File Information</h4>
+                                                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                                                    {analysis.metadata.dimensions && (
+                                                        <div>
+                                                            <span className="text-gray-600">Dimensions:</span>
+                                                            <p className="font-medium">
+                                                                {analysis.metadata.dimensions.x.toFixed(1)}×
+                                                                {analysis.metadata.dimensions.y.toFixed(1)}×
+                                                                {analysis.metadata.dimensions.z.toFixed(1)}mm
+                                                            </p>
+                                                        </div>
+                                                    )}
+                                                    <div>
+                                                        <span className="text-gray-600">Est. Print Time:</span>
+                                                        <p className="font-medium">{analysis.metadata.estimatedPrintTime}</p>
+                                                    </div>
+                                                    {analysis.metadata.materialUsage && (
+                                                        <div>
+                                                            <span className="text-gray-600">Material:</span>
+                                                            <p className="font-medium">{analysis.metadata.materialUsage}</p>
+                                                        </div>
+                                                    )}
+                                                    {analysis.metadata.layerHeight && (
+                                                        <div>
+                                                            <span className="text-gray-600">Layer Height:</span>
+                                                            <p className="font-medium">{analysis.metadata.layerHeight}mm</p>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </div>
+
+                                            {/* Issues */}
+                                            {analysis.issues.length > 0 && (
+                                                <div>
+                                                    <h4 className="font-semibold text-gray-800 mb-3">
+                                                        Issues Found ({analysis.issues.length})
+                                                    </h4>
+                                                    <div className="space-y-3">
+                                                        {analysis.issues.map((issue, index) => (
+                                                            <div
+                                                                key={index}
+                                                                className={`analysis-item p-4 rounded-lg border ${getSeverityColor(issue.severity)}`}
+                                                                style={{ animationDelay: `${index * 0.1}s` }}
+                                                            >
+                                                                <div className="flex justify-between items-start mb-2">
+                                                                    <h5 className="font-medium">{issue.type}</h5>
+                                                                    <span className="text-xs px-2 py-1 rounded bg-white bg-opacity-50">
+                                                                        {issue.severity}
+                                                                    </span>
+                                                                </div>
+                                                                <p className="text-sm mb-2">{issue.message}</p>
+                                                                <p className="text-xs opacity-75">
+                                                                    💡 {issue.recommendation}
+                                                                </p>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            )}
+
+                                            {/* Recommendations */}
+                                            {analysis.recommendations.length > 0 && (
+                                                <div>
+                                                    <h4 className="font-semibold text-gray-800 mb-3">
+                                                        Recommendations
+                                                    </h4>
+                                                    <div className="space-y-2">
+                                                        {analysis.recommendations.map((rec, index) => (
+                                                            <div
+                                                                key={index}
+                                                                className="analysis-item p-3 bg-green-50 border border-green-200 rounded-lg"
+                                                                style={{ animationDelay: `${(analysis.issues.length + index) * 0.1}s` }}
+                                                            >
+                                                                <p className="text-sm text-green-800">
+                                                                    <span className="font-medium">{rec.type}:</span> {rec.message}
+                                                                </p>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            )}
+
+                                            {/* Action Buttons */}
+                                            <div className="flex space-x-4 pt-4">
+                                                <button className="flex-1 bg-blue-600 text-white py-3 px-6 rounded-lg font-medium hover:bg-blue-700 transition-colors">
+                                                    Export Report
+                                                </button>
+                                                <button 
+                                                    className="flex-1 bg-gray-600 text-white py-3 px-6 rounded-lg font-medium hover:bg-gray-700 transition-colors"
+                                                    onClick={() => {
+                                                        setUploadedFile(null);
+                                                        setAnalysis(null);
+                                                    }}
+                                                >
+                                                    Analyze Another File
+                                                </button>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {/* Instructions */}
+                                    {!uploadedFile && !isAnalyzing && (
+                                        <div className="text-center py-8">
+                                            <div className="text-6xl mb-4">🔍</div>
+                                            <h3 className="text-xl font-semibold text-gray-800 mb-2">
+                                                Ready to Analyze
+                                            </h3>
+                                            <p className="text-gray-600">
+                                                {selectedPrinter 
+                                                    ? 'Upload your STL or G-code file to get started'
+                                                    : 'Select a printer first, then upload your file'
+                                                }
+                                            </p>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Footer */}
+                        <div className="text-center mt-12 text-white opacity-75">
+                            <p>© 2024 3D Print Compatibility Analyzer • Prevent failed prints before they happen</p>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        ReactDOM.render(<App />, document.getElementById('root'));
+    </script>
+</body>
+</html>
